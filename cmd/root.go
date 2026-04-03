@@ -316,15 +316,21 @@ func run(cmd *cobra.Command, args []string) error {
 
 	// Check --watch + file args mutual exclusion before resolving args.
 	// Directory args are allowed with --watch (they become patterns).
+	globPatterns := make([]string, 0, len(watchPatterns))
 	if len(watchPatterns) > 0 && len(args) > 0 {
-		if hasNonDirArgs(args) {
+		for _, arg := range args {
+			isDir := isDirArg(arg)
+			fmt.Printf("isDir: %v\n", isDir)
+			if isDir {
+				continue
+			}
 			hasGlob := slices.ContainsFunc(watchPatterns, func(p string) bool {
 				return hasGlobChars(p)
 			})
 			if !hasGlob {
 				return fmt.Errorf("cannot use --watch (-w) with file arguments\n(hint: the shell may have expanded the glob pattern; quote it to prevent expansion, e.g. -w '**/*.md')")
 			}
-			return fmt.Errorf("cannot use --watch (-w) with file arguments")
+			globPatterns = append(globPatterns, arg)
 		}
 	}
 
@@ -333,7 +339,10 @@ func run(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	patterns, err := resolvePatterns(slices.Concat(watchPatterns, dirPatterns))
+	fmt.Printf("watchPatterns: %v\n", watchPatterns)
+	targetPatterns := slices.Concat(globPatterns, dirPatterns)
+	fmt.Printf("targetPatterns: %v\n", targetPatterns)
+	patterns, err := resolvePatterns(targetPatterns)
 	if err != nil {
 		return err
 	}
@@ -476,23 +485,18 @@ func hasGlobChars(s string) bool {
 	return strings.ContainsAny(s, "*?[")
 }
 
-func hasNonDirArgs(args []string) bool {
-	for _, arg := range args {
-		absPath, err := filepath.Abs(arg)
-		if err != nil {
-			// Let resolveArgs surface the underlying error.
-			continue
-		}
-		info, err := os.Stat(absPath)
-		if err != nil {
-			// Path doesn't exist or can't be stat'd; let resolveArgs report it.
-			continue
-		}
-		if !info.IsDir() {
-			return true
-		}
+func isDirArg(arg string) bool {
+	absPath, err := filepath.Abs(arg)
+	if err != nil {
+		// Let resolveArgs surface the underlying error.
+		return true
 	}
-	return false
+	info, err := os.Stat(absPath)
+	if err != nil {
+		// Path doesn't exist or can't be stat'd; let resolveArgs report it.
+		return true
+	}
+	return info.IsDir()
 }
 
 func resolvePatterns(patterns []string) ([]string, error) {
